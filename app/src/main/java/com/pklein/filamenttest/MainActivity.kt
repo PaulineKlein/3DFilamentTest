@@ -1,21 +1,37 @@
 package com.pklein.filamenttest
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Bundle
-import android.util.Log
 import android.view.Choreographer
-import android.view.MotionEvent
 import android.view.SurfaceView
-import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.filament.Skybox
 import com.google.android.filament.utils.*
 import java.nio.ByteBuffer
+import kotlin.math.round
 
-class MainActivity : AppCompatActivity(), View.OnTouchListener {
+class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private lateinit var surfaceView: SurfaceView
     private lateinit var choreographer: Choreographer
     private lateinit var modelViewer: ModelViewer
+
+    private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var magneto: Sensor? = null
+    private val accelerometerRead = FloatArray(3)
+    private val magnetometerRead = FloatArray(3)
+
+    // These two arrays will hold the values of the rotation matrix and orientation angles.
+    private val rotationMatrix = FloatArray(9)
+    private val orientationAngles = FloatArray(3)
+    private var degrees: Double = 0.0
+    private var orientation = FloatArray(3)
 
     // statique
     private val frameCallbackStatic = object : Choreographer.FrameCallback {
@@ -67,36 +83,58 @@ class MainActivity : AppCompatActivity(), View.OnTouchListener {
         surfaceView = SurfaceView(this).apply { setContentView(this) }
         choreographer = Choreographer.getInstance()
         modelViewer = ModelViewer(surfaceView)
-        surfaceView.setOnTouchListener(modelViewer)
-        //  surfaceView.setOnTouchListener(this)
+        surfaceView.setOnTouchListener { _, event ->
+            modelViewer.onTouchEvent(event)
+            true
+        }
 
         // load object
-        loadGltf("BusterDrone")
+        // loadGltf("BusterDrone")
         // loadGlb("DamagedHelmet")
-        // loadGlb("Vehicle")
+        loadGlb("Vehicle")
 
         // load Landscape
-        loadEnvironment("venetian_crossroads_2k")
+        // loadEnvironment("venetian_crossroads_2k")
         // modelViewer.scene.skybox = Skybox.Builder().build(modelViewer.engine)
-        // modelViewer.scene.skybox = Skybox.Builder().color(0.1f, 0.2f, 0.4f, 1.0f).build(modelViewer.engine)
-        // modelViewer.camera.lookAt(3.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
-        hideFloor()
+        // hideFloor()
+        modelViewer.scene.skybox =
+            Skybox.Builder().color(0.1f, 0.2f, 0.4f, 1.0f).build(modelViewer.engine)
+
+        // Manage Sensors :
+        // we need to check whether the sensors we need are available on the device or not
+        this.sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
+            this.accelerometer = it
+        }
+        sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.let {
+            this.magneto = it
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        choreographer.postFrameCallback(frameCallback)
-        // choreographer.postFrameCallback(frameCallbackStatic)
+        //  choreographer.postFrameCallback(frameCallback)
+        choreographer.postFrameCallback(frameCallbackStatic)
+        accelerometer?.also { sensor ->
+            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        magneto?.also { sensor ->
+            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        }
     }
 
     override fun onPause() {
         super.onPause()
+        //  choreographer.removeFrameCallback(frameCallback)
         choreographer.removeFrameCallback(frameCallbackStatic)
+        sensorManager.unregisterListener(this)
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        // choreographer.removeFrameCallback(frameCallback)
         choreographer.removeFrameCallback(frameCallbackStatic)
+        sensorManager.unregisterListener(this)
     }
 
     private fun loadGlb(name: String) {
@@ -124,21 +162,22 @@ class MainActivity : AppCompatActivity(), View.OnTouchListener {
     private fun loadEnvironment(ibl: String) {
         // Create the indirect light source and add it to the scene.
         var buffer = readAsset("envs/$ibl/${ibl}_ibl.ktx")
-        KtxLoader.createIndirectLight(modelViewer.engine, buffer).apply {
+        KTXLoader.createIndirectLight(modelViewer.engine, buffer).apply {
             intensity = 50_000f
             modelViewer.scene.indirectLight = this
         }
 
         // Create the sky box and add it to the scene.
         buffer = readAsset("envs/$ibl/${ibl}_skybox.ktx")
-        KtxLoader.createSkybox(modelViewer.engine, buffer).apply {
+        KTXLoader.createSkybox(modelViewer.engine, buffer).apply {
             modelViewer.scene.skybox = this
         }
     }
 
     private fun Int.getTransform(): Mat4 {
         val tm = modelViewer.engine.transformManager
-        return Mat4.of(*tm.getTransform(tm.getInstance(this), null))
+        val outLocalTransform: FloatArray? = null
+        return Mat4.of(*tm.getTransform(tm.getInstance(this), outLocalTransform))
     }
 
     private fun Int.setTransform(mat: Mat4) {
@@ -168,26 +207,47 @@ class MainActivity : AppCompatActivity(), View.OnTouchListener {
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onTouch(v: View?, event: MotionEvent): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                Log.e("onTouch", "ACTION_DOWN")
-                choreographer.postFrameCallback(frameCallbackStatic)
-                return true
+    private fun updateOrientationAngles() {
+        // To find the device’s orientation, you first need to determine its rotation matrix.
+        // A rotation matrix helps map points from the device’s coordinate system to the real-world coordinate system.
+        SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerRead, magnetometerRead)
+        // It then uses that rotation matrix, which consists of an array of nine values, and maps it to a usable matrix with three values.
+        // In the variable orientation, you get values (in radians) that represent
+        // orientation[0] = Azimuth (rotation around the z-axis)
+        // orientation[1] = Pitch (rotation around the x-axis)
+        // orientation[2] = Roll (rotation around the y-axis)
+        orientation = SensorManager.getOrientation(rotationMatrix, orientationAngles)
+        // Next, it converts the azimuth to degrees, adding 360 because the angle is always positive
+        val degreesAngle = (Math.toDegrees(orientation[0].toDouble()) + 360.0) % 360.0
+        // Finally, it rounds the angle up to two decimal places.
+        degrees = round(degreesAngle * 100) / 100
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        // a sensor reports a new value
+        when (event?.sensor?.type) {
+            Sensor.TYPE_ACCELEROMETER -> {
+                // System.arrayCopy copies values from the sensors into its respective array.
+                System.arraycopy(event.values, 0, accelerometerRead, 0, accelerometerRead.size)
+                updateOrientationAngles()
             }
-            MotionEvent.ACTION_MOVE -> {
-                Log.e("onTouch", "ACTION_MOVE")
-                choreographer.postFrameCallback(frameCallbackStatic)
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                Log.e("onTouch", "ACTION_UP")
-                choreographer.postFrameCallback(frameCallbackStatic)
-                return true
+            Sensor.TYPE_MAGNETIC_FIELD -> {
+                System.arraycopy(event.values, 0, magnetometerRead, 0, magnetometerRead.size)
+                updateOrientationAngles()
             }
         }
-        return super.onTouchEvent(event)
+        modelViewer.asset?.apply {
+            modelViewer.transformToUnitCube()
+            val rootTransform = this.root.getTransform()
+            val zAxis = Float3(0f, 0f, 1f)
+            this.root.setTransform(rootTransform * rotation(zAxis * degrees.toFloat()))
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // a sensor’s accuracy changes. In this case, the system invokes the onAccuracyChanged()
+        // method, providing you with a reference to the Sensor object, which has changed,
+        // and the new accuracy of the sensor.
     }
 
     companion object {
