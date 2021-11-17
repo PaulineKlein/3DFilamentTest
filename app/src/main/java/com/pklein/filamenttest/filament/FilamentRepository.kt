@@ -5,8 +5,8 @@ import com.google.android.filament.Skybox
 import com.google.android.filament.utils.Float3
 import com.google.android.filament.utils.ModelViewer
 import com.google.android.filament.utils.rotation
-import com.pklein.filamenttest.getTransform
-import com.pklein.filamenttest.setTransform
+import com.pklein.filamenttest.utils.getTransform
+import com.pklein.filamenttest.utils.setTransform
 
 const val VEHICLE_OBJECT = "Vehicle"
 const val HELMET_OBJECT = "DamagedHelmet"

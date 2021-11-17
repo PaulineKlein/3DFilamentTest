@@ -1,4 +1,4 @@
-package com.pklein.filamenttest
+package com.pklein.filamenttest.utils
 
 import com.google.android.filament.utils.Mat4
 import com.google.android.filament.utils.ModelViewer

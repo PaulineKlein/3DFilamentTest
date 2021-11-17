@@ -8,8 +8,8 @@ import com.google.android.filament.utils.Float3
 import com.google.android.filament.utils.KTXLoader
 import com.google.android.filament.utils.ModelViewer
 import com.google.android.filament.utils.rotation
-import com.pklein.filamenttest.getTransform
-import com.pklein.filamenttest.setTransform
+import com.pklein.filamenttest.utils.getTransform
+import com.pklein.filamenttest.utils.setTransform
 import java.nio.ByteBuffer
 
 @SuppressLint("ClickableViewAccessibility")
