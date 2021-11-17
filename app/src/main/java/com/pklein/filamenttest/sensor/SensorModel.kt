@@ -66,11 +66,15 @@ class SensorModel(private val sensorManager: SensorManager) : SensorEventListene
         when (event?.sensor?.type) {
             Sensor.TYPE_ACCELEROMETER -> {
                 // System.arrayCopy copies values from the sensors into its respective array.
-                System.arraycopy(event.values, 0, accelerometerRead, 0, accelerometerRead.size)
+                if(event.values != null) {
+                    System.arraycopy(event.values, 0, accelerometerRead, 0, accelerometerRead.size)
+                }
                 updateOrientationAngles()
             }
             Sensor.TYPE_MAGNETIC_FIELD -> {
-                System.arraycopy(event.values, 0, magnetometerRead, 0, magnetometerRead.size)
+                if(event.values != null) {
+                    System.arraycopy(event.values, 0, magnetometerRead, 0, magnetometerRead.size)
+                }
                 updateOrientationAngles()
             }
         }
